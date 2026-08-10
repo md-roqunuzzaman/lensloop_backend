@@ -1,0 +1,173 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CUSTOMER
+  PROVIDER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum RentalStatus {
+  PLACED
+  CONFIRMED
+  CANCELLED
+  PAID
+  PICKED_UP
+  RETURNED
+}
+
+enum PaymentMethod {
+  STRIPE
+  SSLCOMMERZ
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+model User {
+  id           String     @id @default(uuid())
+  name         String
+  email        String     @unique
+  password     String
+  phone        String?
+  avatar       String?
+  role         Role       @default(CUSTOMER)
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  gearItems    GearItem[]     @relation("ProviderGear")
+  rentalOrders RentalOrder[]  @relation("CustomerOrders")
+  payments     Payment[]
+  reviews      Review[]
+
+  @@map("users")
+}
+
+model Category {
+  id          String     @id @default(uuid())
+  name        String     @unique
+  slug        String     @unique
+  description String?
+  image       String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  gearItems   GearItem[]
+
+  @@map("categories")
+}
+
+model GearItem {
+  id              String   @id @default(uuid())
+  providerId      String
+  categoryId      String
+  name            String
+  slug            String   @unique
+  description     String
+  brand           String?
+  images          String[]
+  pricePerDay     Decimal  @db.Decimal(10, 2)
+  stock           Int      @default(1)
+  availableStock  Int      @default(1)
+  specifications  Json?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  provider        User             @relation("ProviderGear", fields: [providerId], references: [id], onDelete: Cascade)
+  category        Category         @relation(fields: [categoryId], references: [id])
+  orderItems      RentalOrderItem[]
+  reviews         Review[]
+
+  @@index([categoryId])
+  @@index([providerId])
+  @@map("gear_items")
+}
+
+model RentalOrder {
+  id           String       @id @default(uuid())
+  customerId   String
+  status       RentalStatus @default(PLACED)
+  startDate    DateTime
+  endDate      DateTime
+  totalAmount  Decimal      @db.Decimal(10, 2)
+  notes        String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  customer     User               @relation("CustomerOrders", fields: [customerId], references: [id], onDelete: Cascade)
+  items        RentalOrderItem[]
+  payment      Payment?
+  reviews      Review[]
+
+  @@index([customerId])
+  @@map("rental_orders")
+}
+
+model RentalOrderItem {
+  id            String   @id @default(uuid())
+  rentalOrderId String
+  gearItemId    String
+  quantity      Int      @default(1)
+  pricePerDay   Decimal  @db.Decimal(10, 2)
+  subtotal      Decimal  @db.Decimal(10, 2)
+
+  rentalOrder   RentalOrder @relation(fields: [rentalOrderId], references: [id], onDelete: Cascade)
+  gearItem      GearItem    @relation(fields: [gearItemId], references: [id])
+
+  @@map("rental_order_items")
+}
+
+model Payment {
+  id              String        @id @default(uuid())
+  rentalOrderId   String        @unique
+  userId          String
+  transactionId   String        @unique
+  amount          Decimal       @db.Decimal(10, 2)
+  method          PaymentMethod
+  status          PaymentStatus @default(PENDING)
+  gatewayResponse Json?
+  paidAt          DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  rentalOrder     RentalOrder @relation(fields: [rentalOrderId], references: [id], onDelete: Cascade)
+  user            User        @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("payments")
+}
+
+model Review {
+  id            String   @id @default(uuid())
+  gearItemId    String
+  customerId    String
+  rentalOrderId String
+  rating        Int
+  comment       String
+  createdAt     DateTime @default(now())
+
+  gearItem      GearItem    @relation(fields: [gearItemId], references: [id], onDelete: Cascade)
+  customer      User        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  rentalOrder   RentalOrder @relation(fields: [rentalOrderId], references: [id], onDelete: Cascade)
+
+  @@unique([rentalOrderId, gearItemId])
+  @@index([gearItemId])
+  @@map("reviews")
+}
