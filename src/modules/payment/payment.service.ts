@@ -14,6 +14,13 @@ export const paymentService = {
     rentalOrderId: string,
     method: "STRIPE" | "SSLCOMMERZ",
   ) {
+    console.log("\n========================================");
+    console.log("💳 PAYMENT INITIATION START");
+    console.log("User ID:", userId);
+    console.log("Rental Order ID:", rentalOrderId);
+    console.log("Payment Method:", method);
+    console.log("========================================");
+
     // -------------------------------------------------------
     // 1. Find rental order
     // -------------------------------------------------------
@@ -34,38 +41,46 @@ export const paymentService = {
       },
     });
 
+    console.log("Rental order found:", !!order);
+
     // -------------------------------------------------------
     // 2. Validate order
     // -------------------------------------------------------
 
     if (!order) {
+      console.error("❌ Rental order not found:", rentalOrderId);
+
       throw ApiError.notFound("Rental order not found");
     }
 
+    console.log("Order customer:", order.customerId);
+    console.log("Current order status:", order.status);
+    console.log("Order total:", order.totalAmount);
+
     if (order.customerId !== userId) {
+      console.error("❌ Unauthorized payment attempt");
+
       throw ApiError.forbidden("You do not have access to this order");
     }
 
     if (order.status !== "CONFIRMED") {
+      console.error("❌ Invalid order status for payment:", order.status);
+
       throw ApiError.badRequest("Only confirmed orders can be paid for");
     }
 
     // -------------------------------------------------------
-    // 3. Prevent paying an already-paid order
+    // 3. Prevent duplicate completed payment
     // -------------------------------------------------------
 
     if (order.payment && order.payment.status === "COMPLETED") {
+      console.log("⚠️ Payment already completed");
+
       throw ApiError.conflict("This order has already been paid for");
     }
 
     // -------------------------------------------------------
     // 4. Calculate rental duration
-    //
-    // Example:
-    // startDate = Aug 10
-    // endDate   = Aug 15
-    //
-    // 5 rental days
     // -------------------------------------------------------
 
     const startDate = new Date(order.startDate);
@@ -74,6 +89,8 @@ export const paymentService = {
     const differenceInMs = endDate.getTime() - startDate.getTime();
 
     const rentalDays = Math.ceil(differenceInMs / (1000 * 60 * 60 * 24));
+
+    console.log("Rental days:", rentalDays);
 
     if (rentalDays <= 0) {
       throw ApiError.badRequest("Invalid rental duration");
@@ -85,15 +102,10 @@ export const paymentService = {
 
     const transactionId = generateTransactionId("GEARUP");
 
+    console.log("Generated transaction ID:", transactionId);
+
     // -------------------------------------------------------
-    // 6. Calculate Stripe amount
-    //
-    // Example:
-    //
-    // $20/day
-    // × 5 days
-    // × quantity 2
-    // = $200
+    // 6. Calculate total
     // -------------------------------------------------------
 
     const calculatedTotal = order.items.reduce((total, item) => {
@@ -103,27 +115,34 @@ export const paymentService = {
 
       const itemTotal = pricePerDay * rentalDays * quantity;
 
+      console.log("Item calculation:", {
+        gearItem: item.gearItem.name,
+        pricePerDay,
+        quantity,
+        rentalDays,
+        itemTotal,
+      });
+
       return total + itemTotal;
     }, 0);
 
-    // -------------------------------------------------------
-    // 7. Compare calculated amount with order total
-    //
-    // This protects against amount mismatch.
-    // -------------------------------------------------------
-
     const orderTotal = Number(order.totalAmount);
+
+    console.log("Calculated total:", calculatedTotal);
+    console.log("Database order total:", orderTotal);
 
     const amountDifference = Math.abs(calculatedTotal - orderTotal);
 
     if (amountDifference > 0.01) {
+      console.error("❌ PAYMENT AMOUNT MISMATCH");
+
       throw ApiError.badRequest(
         `Payment amount mismatch. Order total: ${orderTotal}, calculated total: ${calculatedTotal}`,
       );
     }
 
     // -------------------------------------------------------
-    // 8. Create / update payment
+    // 7. Create / update payment
     // -------------------------------------------------------
 
     const payment = await prisma.payment.upsert({
@@ -150,14 +169,19 @@ export const paymentService = {
       },
     });
 
+    console.log("✅ Payment record created/updated");
+    console.log("Payment ID:", payment.id);
+    console.log("Payment transactionId:", payment.transactionId);
+    console.log("Payment status:", payment.status);
+
     // =======================================================
     // STRIPE
     // =======================================================
 
     if (method === "STRIPE") {
-      // -----------------------------------------------------
-      // Create Stripe Checkout Session
-      // -----------------------------------------------------
+      console.log("\n========================================");
+      console.log("💳 CREATING STRIPE CHECKOUT");
+      console.log("========================================");
 
       const session = await stripe.checkout.sessions.create({
         mode: "payment",
@@ -169,22 +193,15 @@ export const paymentService = {
 
           const quantity = Number(item.quantity);
 
-          /*
-           * Stripe unit_amount is the price
-           * of ONE complete line item.
-           *
-           * Example:
-           *
-           * $20/day × 5 days
-           * = $100 per item
-           *
-           * quantity = 2
-           *
-           * Stripe total:
-           * $100 × 2 = $200
-           */
-
           const unitAmount = Math.round(pricePerDay * rentalDays * 100);
+
+          console.log("Stripe line item:", {
+            name: item.gearItem.name,
+            pricePerDay,
+            rentalDays,
+            quantity,
+            unitAmount,
+          });
 
           return {
             price_data: {
@@ -211,9 +228,11 @@ export const paymentService = {
         cancel_url: `${env.clientUrl}/payment/cancel?transactionId=${transactionId}`,
       });
 
-      // -----------------------------------------------------
-      // Return Stripe redirect information
-      // -----------------------------------------------------
+      console.log("✅ Stripe Checkout created");
+      console.log("Stripe Session ID:", session.id);
+      console.log("Stripe Session URL:", session.url);
+
+      console.log("Stripe metadata:", session.metadata);
 
       return {
         payment,
@@ -228,17 +247,7 @@ export const paymentService = {
     // SSL COMMERZ
     // =======================================================
 
-    /*
-     * SSLCommerz is currently scaffolded.
-     *
-     * For real SSLCommerz integration, this section should:
-     *
-     * 1. Send payment request to SSLCommerz
-     * 2. Receive GatewayPageURL
-     * 3. Return GatewayPageURL
-     * 4. Handle success/fail/cancel/IPN callbacks
-     * 5. Validate transaction server-side
-     */
+    console.log("⚠️ SSLCommerz integration is scaffolded");
 
     const redirectUrl = `${env.clientUrl}/payment/sslcommerz-redirect?transactionId=${transactionId}`;
 
@@ -253,18 +262,16 @@ export const paymentService = {
 
   // =========================================================
   // CONFIRM PAYMENT
-  //
-  // IMPORTANT:
-  // This function should ONLY be called after
-  // server-side gateway verification.
-  //
-  // For Stripe:
-  // Stripe Webhook -> verify signature
-  // -> verify payment_status
-  // -> call this function
   // =========================================================
 
   async confirm(transactionId: string, gatewayReference?: string) {
+    console.log("\n========================================");
+    console.log("🔥 PAYMENT CONFIRM START");
+    console.log("========================================");
+    console.log("Transaction ID:", transactionId);
+    console.log("Gateway Reference:", gatewayReference);
+    console.log("========================================");
+
     // -------------------------------------------------------
     // 1. Find payment
     // -------------------------------------------------------
@@ -275,26 +282,65 @@ export const paymentService = {
       },
     });
 
+    console.log(
+      "Payment lookup result:",
+      payment
+        ? {
+            id: payment.id,
+            transactionId: payment.transactionId,
+            rentalOrderId: payment.rentalOrderId,
+            userId: payment.userId,
+            status: payment.status,
+            amount: payment.amount,
+          }
+        : null,
+    );
+
+    // -------------------------------------------------------
+    // 2. Payment not found
+    // -------------------------------------------------------
+
     if (!payment) {
+      console.error("\n❌❌❌ PAYMENT NOT FOUND ❌❌❌");
+
+      console.error("Transaction ID searched:", transactionId);
+
+      console.error("Possible reason:");
+
+      console.error("1. Stripe and backend are using different databases");
+
+      console.error("2. Payment record was never created");
+
+      console.error("3. Transaction ID changed");
+
+      console.error("4. Wrong DATABASE_URL");
+
+      console.error("5. Webhook is hitting a different backend");
+
+      console.error("❌❌❌ END PAYMENT NOT FOUND ❌❌❌\n");
+
       throw ApiError.notFound("Payment not found");
     }
 
     // -------------------------------------------------------
-    // 2. Idempotency
-    //
-    // Stripe can send duplicate webhook events.
-    // If already completed, don't update again.
+    // 3. Idempotency
     // -------------------------------------------------------
 
     if (payment.status === "COMPLETED") {
+      console.log("ℹ️ Payment already completed");
+
       return payment;
     }
 
     // -------------------------------------------------------
-    // 3. Update payment + rental order atomically
+    // 4. Atomic database transaction
     // -------------------------------------------------------
 
-    return prisma.$transaction(async (tx) => {
+    console.log("🔄 Starting Prisma transaction...");
+
+    const result = await prisma.$transaction(async (tx) => {
+      console.log("🔄 Updating payment...");
+
       const updatedPayment = await tx.payment.update({
         where: {
           transactionId,
@@ -313,7 +359,15 @@ export const paymentService = {
         },
       });
 
-      await tx.rentalOrder.update({
+      console.log("✅ Payment updated:", {
+        id: updatedPayment.id,
+        status: updatedPayment.status,
+        transactionId: updatedPayment.transactionId,
+      });
+
+      console.log("🔄 Updating rental order:", payment.rentalOrderId);
+
+      const updatedOrder = await tx.rentalOrder.update({
         where: {
           id: payment.rentalOrderId,
         },
@@ -323,8 +377,25 @@ export const paymentService = {
         },
       });
 
-      return updatedPayment;
+      console.log("✅ Rental order updated:", {
+        id: updatedOrder.id,
+        status: updatedOrder.status,
+      });
+
+      return {
+        payment: updatedPayment,
+        order: updatedOrder,
+      };
     });
+
+    console.log("\n========================================");
+    console.log("🎉 PAYMENT CONFIRMATION SUCCESS");
+    console.log("Payment ID:", result.payment.id);
+    console.log("Rental Order ID:", result.order.id);
+    console.log("Rental Order Status:", result.order.status);
+    console.log("========================================\n");
+
+    return result.payment;
   },
 
   // =========================================================
@@ -332,6 +403,8 @@ export const paymentService = {
   // =========================================================
 
   async markFailed(transactionId: string, reason?: string) {
+    console.log("❌ Marking payment as failed:", transactionId);
+
     const payment = await prisma.payment.findUnique({
       where: {
         transactionId,
@@ -342,8 +415,9 @@ export const paymentService = {
       throw ApiError.notFound("Payment not found");
     }
 
-    // Don't mark a completed payment as failed.
     if (payment.status === "COMPLETED") {
+      console.log("Payment already completed. Cannot mark failed.");
+
       return payment;
     }
 
@@ -449,9 +523,6 @@ export const paymentService = {
     if (!payment) {
       throw ApiError.notFound("Payment not found");
     }
-
-    // ADMIN can see any payment.
-    // Customer can only see own payment.
 
     if (role !== "ADMIN" && payment.userId !== userId) {
       throw ApiError.forbidden("Access denied");

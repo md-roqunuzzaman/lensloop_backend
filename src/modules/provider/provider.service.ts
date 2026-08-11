@@ -148,7 +148,11 @@ export const providerService = {
   },
 
   async dashboardStats(providerId: string) {
-    const [totalGear, activeGear, pendingOrders, activeRentals, revenueAgg] = await Promise.all([
+    const firstMonth = new Date();
+    firstMonth.setMonth(firstMonth.getMonth() - 5, 1);
+    firstMonth.setHours(0, 0, 0, 0);
+
+    const [totalGear, activeGear, pendingOrders, activeRentals, revenueAgg, averageRatingAgg, revenuePayments, recentOrders] = await Promise.all([
       prisma.gearItem.count({ where: { providerId } }),
       prisma.gearItem.count({ where: { providerId, isActive: true } }),
       prisma.rentalOrder.count({
@@ -167,7 +171,45 @@ export const providerService = {
           rentalOrder: { items: { some: { gearItem: { providerId } } } },
         },
       }),
+      prisma.review.aggregate({
+        _avg: { rating: true },
+        where: { gearItem: { providerId } },
+      }),
+      prisma.payment.findMany({
+        where: {
+          status: 'COMPLETED',
+          paidAt: { gte: firstMonth },
+          rentalOrder: { items: { some: { gearItem: { providerId } } } },
+        },
+        select: { amount: true, paidAt: true },
+      }),
+      prisma.rentalOrder.findMany({
+        where: { items: { some: { gearItem: { providerId } } } },
+        include: {
+          customer: { select: { name: true } },
+          items: { include: { gearItem: { select: { name: true } } } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 4,
+      }),
     ]);
+
+    const revenueByMonth = Array.from({ length: 6 }, (_, index) => {
+      const month = new Date(firstMonth);
+      month.setMonth(firstMonth.getMonth() + index);
+      return {
+        key: `${month.getFullYear()}-${month.getMonth()}`,
+        month: month.toLocaleString('en-US', { month: 'short' }),
+        revenue: 0,
+      };
+    });
+    const revenueByMonthKey = new Map(revenueByMonth.map((month) => [month.key, month]));
+    for (const payment of revenuePayments) {
+      if (!payment.paidAt) continue;
+      const key = `${payment.paidAt.getFullYear()}-${payment.paidAt.getMonth()}`;
+      const month = revenueByMonthKey.get(key);
+      if (month) month.revenue += Number(payment.amount);
+    }
 
     return {
       totalGear,
@@ -175,6 +217,16 @@ export const providerService = {
       pendingOrders,
       activeRentals,
       totalRevenue: revenueAgg._sum.amount ?? 0,
+      averageRating: averageRatingAgg._avg.rating ?? 0,
+      revenueByMonth: revenueByMonth.map(({ month, revenue }) => ({ month, revenue })),
+      recentOrders: recentOrders.map((order) => ({
+        id: order.id,
+        gearTitle: order.items.map((item) => item.gearItem.name).join(', '),
+        customerName: order.customer.name,
+        startDate: order.startDate,
+        endDate: order.endDate,
+        status: order.status,
+      })),
     };
   },
 };

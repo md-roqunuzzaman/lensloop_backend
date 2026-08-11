@@ -1,18 +1,17 @@
-import { PrismaClient } from '@prisma/client';
-import { env } from './env';
+import "dotenv/config";
+import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 
-// Prevent multiple PrismaClient instances in dev (ts-node-dev hot reload).
-declare global {
-  // eslint-disable-next-line no-var
-  var __prisma: PrismaClient | undefined;
+const connectionString = process.env.DATABASE_URL;
+
+if (!connectionString) {
+  throw new Error("DATABASE_URL is not defined");
 }
 
-export const prisma =
-  global.__prisma ||
-  new PrismaClient({
-    log: env.nodeEnv === 'development' ? ['warn', 'error'] : ['error'],
-  });
+const adapter = new PrismaPg({
+  connectionString,
+});
 
-if (env.nodeEnv !== 'production') {
-  global.__prisma = prisma;
-}
+export const prisma = new PrismaClient({
+  adapter,
+});
