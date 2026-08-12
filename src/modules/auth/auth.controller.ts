@@ -85,11 +85,19 @@ export const authController = {
     });
   }),
 
-  /*
-  |--------------------------------------------------------------------------
-  | REFRESH
-  |--------------------------------------------------------------------------
-  */
+  google: catchAsync(async (req: Request, res: Response) => {
+    const { idToken } = req.body;
+
+    const result = await authService.googleLogin(idToken);
+
+    res.cookie("accessToken", result.accessToken, ACCESS_COOKIE_OPTIONS);
+
+    res.cookie("refreshToken", result.refreshToken, REFRESH_COOKIE_OPTIONS);
+
+    sendResponse(res, StatusCodes.OK, "Google login successful", {
+      user: result.user,
+    });
+  }),
 
   refresh: catchAsync(async (req: Request, res: Response) => {
     /*

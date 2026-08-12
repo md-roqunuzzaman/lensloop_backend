@@ -13,6 +13,7 @@ model User {
   password     String
   phone        String?
   avatar       String?
+  googleId     String?       @unique
   role         Role          @default(CUSTOMER)
   status       UserStatus    @default(ACTIVE)
   createdAt    DateTime      @default(now())

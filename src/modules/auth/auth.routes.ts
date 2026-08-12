@@ -15,6 +15,8 @@ router.post("/register", validate(registerSchema), authController.register);
 // Login
 router.post("/login", validate(loginSchema), authController.login);
 
+router.post("/google", authController.google);
+
 // Refresh access token
 router.post("/refresh", validate(refreshSchema), authController.refresh);
 
